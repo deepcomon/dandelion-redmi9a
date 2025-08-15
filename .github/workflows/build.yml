@@ -1,4 +1,4 @@
-name: Build Kernel
+name: build
 
 on:
   workflow_dispatch:
@@ -8,52 +8,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up job
-        uses: actions/checkout@v3
+    - name: Checkout repo
+      uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc bison build-essential ccache curl flex gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi git libncurses5-dev libssl-dev \
-            make python3 unzip wget zip
+    - name: Clone kernel source
+      run: |
+        git clone https://github.com/dandelion64-Archives/android_kernel_mediatek_mt6765g.git kernel
+        cd kernel
+        ls -la
 
-      - name: Clone kernel source
-        run: |
-          git clone https://github.com/dandelion64-Archives/android_kernel_mediatek_mt6765g.git kernel
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison flex libssl-dev make gcc clang lld
 
-      - name: Build kernel
-        run: |
-          cd kernel
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KCFLAGS=-Wno-error
-          export HOSTCFLAGS=-Wno-error
-          make dandelion_defconfig
-          make -j$(nproc) || (echo "Kernel build failed" && exit 1)
-          echo "=== Built files in arch/arm64/boot ==="
-          find arch/arm64/boot -type f
+    - name: Build kernel (Image.gz-dtb)
+      run: |
+        cd kernel
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export PATH=$PATH:$(pwd)/../toolchain/bin
+        make O=out defconfig
+        make -j$(nproc) O=out
+        find . -name "Image.gz-dtb"
 
-      - name: Prepare flashable ZIP
-        run: |
-          cd kernel
-          IMG_PATH=$(find arch/arm64/boot -type f \( -name "Image.gz-dtb" -o -name "Image.gz" \) | head -n 1)
-          if [ -z "$IMG_PATH" ]; then
-            echo "Error: No Image.gz-dtb or Image.gz found!"
-            exit 1
-          fi
-          cd ..
-          mkdir AnyKernel
-          git clone https://github.com/<your-anykernel-repo>.git AnyKernel
-          cp "$IMG_PATH" AnyKernel/
-          cd AnyKernel
-          zip -r9 ../Kernel.zip ./*
+    - name: Prepare flashable ZIP
+      run: |
+        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel
+        IMAGE_PATH=$(find kernel -name "Image.gz-dtb" | head -n 1)
+        if [ -z "$IMAGE_PATH" ]; then
+          echo "Image.gz-dtb not found!"
+          exit 1
+        fi
+        cp "$IMAGE_PATH" AnyKernel/
+        cd AnyKernel
+        zip -r9 ../kernel.zip *
 
-      - name: Upload flashable ZIP
-        uses: actions/upload-artifact@v3
-        with:
-          name: Kernel
-          path: Kernel.zip
+    - name: Upload flashable ZIP as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-flashable
+        path: kernel.zip
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: kernel.zip
+        tag_name: build-${{ github.run_number }}
+        name: "Kernel Build #${{ github.run_number }}"
+        body: "Автоматическая сборка ядра"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
