@@ -13,28 +13,35 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc bison build-essential ccache curl flex gcc clang libssl-dev \
-            git kmod libncurses5-dev libelf-dev wget zip unzip
+          sudo apt install -y git bc bison build-essential ccache curl flex gcc clang lld \
+              libssl-dev libncurses5-dev libelf-dev wget zip unzip
 
-      - name: Build kernel
+      - name: Download kernel source
         run: |
+          git clone --depth=1 https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git -b dandelion-q-oss kernel
+
+      - name: Apply defconfig
+        run: |
+          cp dandelion_defconfig kernel/arch/arm64/configs/dandelion_defconfig
+
+      - name: Build kernel (Image.gz-dtb)
+        run: |
+          cd kernel
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          mkdir output
-          make O=output dandelion_defconfig
-          make O=output -j$(nproc)
+          make dandelion_defconfig
+          make -j$(nproc)
 
       - name: Prepare flashable ZIP
         run: |
-          mkdir -p anykernel
-          cd anykernel
-          git clone https://github.com/osm0sis/AnyKernel3.git .
-          cp ../output/arch/arm64/boot/Image.gz-dtb ./Image.gz-dtb
-          zip -r9 ../nethunter-kernel.zip * -x .git* README.md *placeholder
+          git clone https://github.com/osm0sis/AnyKernel3.git ak3
+          cp kernel/arch/arm64/boot/Image.gz-dtb ak3/zImage
+          cd ak3
+          zip -r9 ../nethunter-dandelion-kernel.zip * 
 
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: nethunter-kernel
-          path: nethunter-kernel.zip
+          name: nethunter-dandelion-kernel.zip
+          path: nethunter-dandelion-kernel.zip
