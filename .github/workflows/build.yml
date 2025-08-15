@@ -13,7 +13,10 @@ jobs:
 
       - name: Clone kernel source
         run: |
-          git clone https://github.com/<твой-репозиторий-с-ядром>.git kernel
+          git clone https://github.com/dandelion64-Archives/android_kernel_mediatek_mt6765g.git kernel
+          cd kernel
+          echo "KERNEL_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          cd ..
 
       - name: Install dependencies
         run: |
@@ -33,18 +36,39 @@ jobs:
           export KCFLAGS=-Wno-error
           export HOSTCFLAGS=-Wno-error
           make dandelion_defconfig
-          make -j$(nproc) Image.gz-dtb
+          make -j$(nproc) Image.gz-dtb | tee build.log
 
       - name: Prepare flashable ZIP
         run: |
           mkdir AnyKernel
           cd AnyKernel
-          git clone https://github.com/<твой-anykernel-репозиторий>.git .
+          git clone https://github.com/osm0sis/AnyKernel3.git .
           cp ../kernel/arch/arm64/boot/Image.gz-dtb .
           zip -r9 ../Kernel.zip ./*
 
-      - name: Upload flashable ZIP
+      - name: Upload flashable ZIP as artifact
         uses: actions/upload-artifact@v4
         with:
           name: Kernel
           path: Kernel.zip
+
+      - name: Upload build log as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: kernel/build.log
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kernel-build-${{ github.run_id }}-${{ env.KERNEL_COMMIT }}
+          name: Kernel Build ${{ github.run_id }} (commit ${{ env.KERNEL_COMMIT }})
+          body: |
+            ✅ Автоматическая сборка ядра завершена.
+            📅 Дата: ${{ github.run_id }}
+            🔹 Commit ядра: ${{ env.KERNEL_COMMIT }}
+            ⚙️ Источник ядра: https://github.com/dandelion64-Archives/android_kernel_mediatek_mt6765g
+          files: |
+            Kernel.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
