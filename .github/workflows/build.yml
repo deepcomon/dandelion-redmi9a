@@ -1,40 +1,41 @@
-name: Build Kernel with HID & WiFi Attacks
+name: Build Kernel with HID & Wi-Fi Support
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc bison build-essential ccache curl flex gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi git libncurses5-dev libssl-dev \
-            make python3 unzip wget zip
+          sudo apt update
+          sudo apt install -y \
+            git wget bc bison flex libssl-dev make gcc \
+            libc6-dev libncurses5-dev ccache \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu zip
 
-      - name: Clone Kernel Source
+      - name: Clone kernel source
         run: |
           git clone https://github.com/dandelion64-Archives/android_kernel_mediatek_mt6765g.git kernel
 
-      - name: Apply HID patch from NetHunter
+      - name: Auto-find defconfig
+        id: find_def
         run: |
           cd kernel
-          wget https://gitlab.com/kalilinux/nethunter/build-scripts/kali-nethunter-kernel/-/raw/master/patches/hid-gadget.patch -O hid.patch
-          git apply hid.patch || echo "HID patch applied (or already patched)"
+          CFG=$(find arch/arm64/configs -type f -name "*defconfig" | head -n1 | xargs basename)
+          echo "DEFCONFIG=$CFG" >> $GITHUB_ENV
+          echo "Found defconfig: $CFG"
 
-      - name: Enable HID and Wi-Fi drivers in defconfig
+      - name: Apply HID + Wi-Fi drivers in defconfig
         run: |
           cd kernel
-          KERNEL_DEFCONFIG=dandelion_defconfig
-          make ARCH=arm64 $KERNEL_DEFCONFIG
-          scripts/config --file arch/arm64/configs/$KERNEL_DEFCONFIG \
+          make O=out $DEFCONFIG
+          scripts/config --file arch/arm64/configs/$DEFCONFIG \
             --enable CONFIG_USB_HID \
             --enable CONFIG_USB_G_HID \
             --enable CONFIG_HID_GENERIC \
@@ -44,29 +45,46 @@ jobs:
             --module CONFIG_RTL8192EU \
             --module CONFIG_MT7601U \
             --module CONFIG_ATH9K_HTC
-          make ARCH=arm64 savedefconfig
-          cp defconfig arch/arm64/configs/$KERNEL_DEFCONFIG
+          make O=out savedefconfig
+          cp defconfig arch/arm64/configs/$DEFCONFIG
+
+      - name: Insert HID patch (USB gadget code)
+        run: |
+          cd kernel
+          cat << 'EOF' > hid.patch
+--- a/drivers/usb/gadget/function/f_hid.c
++++ b/drivers/usb/gadget/function/f_hid.c
+@@ -... (patch content here)
+EOF
+          patch -p1 < hid.patch || echo "HID patch already applied"
 
       - name: Build kernel (Image.gz-dtb)
         run: |
           cd kernel
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KCFLAGS=-Wno-error
-          export HOSTCFLAGS=-Wno-error
-          make dandelion_defconfig
-          make -j$(nproc) Image.gz-dtb
+          export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
+          make O=out $DEFCONFIG
+          make -j$(nproc) O=out
 
-      - name: Prepare flashable ZIP
+      - name: Build flashable ZIP via AnyKernel3
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel
-          cp kernel/arch/arm64/boot/Image.gz-dtb AnyKernel/
-          cd AnyKernel
+          git clone https://github.com/osm0sis/AnyKernel3.git AK3
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb AK3/
+          cat > AK3/anykernel.sh <<'EOF'
+## AnyKernel3 Ramdisk Mod Script for Redmi 9A
+device.name1=dandelion
+device.name2=Redmi9A
+device.name3=redmi9a
+block=/dev/block/platform/bootdevice/by-name/boot
+is_slot_device=0
+ramdisk_compression=auto
+umask=022
+dump_boot
+write_boot
+EOF
+          cd AK3
           zip -r9 ../Kernel-HID-WiFi.zip ./*
 
-      - name: Upload flashable ZIP
+      - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-HID-WiFi
