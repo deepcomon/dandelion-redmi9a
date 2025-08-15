@@ -1,0 +1,32 @@
+name: Build Nethunter Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y bc bison build-essential ccache curl flex gcc clang libssl-dev \
+            git kmod libncurses5-dev libelf-dev wget zip unzip
+
+      - name: Build kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          mkdir output
+          make O=output dandelion_defconfig
+          make O=output -j$(nproc)
+
+      - name: Upload build
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel-output
+          path: output/arch/arm64/boot/Image.gz-dtb
